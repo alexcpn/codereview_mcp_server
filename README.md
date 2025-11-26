@@ -14,7 +14,7 @@ pinned: false
 
 MCP is the Model Context Protocol that is used to expose APIs to LLMs, both API description as well as a way to call the API through JSON-RPC.
 
-The MCP server exposes multiple tools implemented in [tools\code_indexer.py](codereivew_mcp_server/tools/code_indexer.py):
+The MCP server exposes multiple tools implemented in [tools\code_indexer.py](/tools/code_indexer.py):
 - get_function_context_for_project_mcp
 Get the details of a function in a GitHub repo along with its callees.
 - get_function_references_mcp
