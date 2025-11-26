@@ -14,10 +14,15 @@ pinned: false
 
 MCP is the Model Context Protocol that is used to expose APIs to LLMs, both API description as well as a way to call the API through JSON-RPC.
 
-The MCP server exposes multiple tools implemented in [tools\code_indexer.py](code_ast_mcp_server/tools/code_indexer.py):
-- `get_function_context_for_project_mcp` returns the definition and docstring for a function.
-- `get_function_references_mcp` lists the call sites for a given function.
-- `search_codebase_mcp` performs a lightweight string search across the indexed repository.
+The MCP server exposes multiple tools implemented in [tools\code_indexer.py](codereivew_mcp_server/tools/code_indexer.py):
+- get_function_context_for_project_mcp
+Get the details of a function in a GitHub repo along with its callees.
+- get_function_references_mcp
+Get the references of a function in a GitHub repo.
+- search_codebase_mcp
+Search the repository for `term` and return matching lines in grep-like format.
+- get_pull_request_diff_mcp
+Fetch per-file diffs for a given repo URL and PR number. Get the git diff of the changes of all commits for the given pull/merge request number.
 
 The Server use the [TreeSitter project](https://tree-sitter.github.io/tree-sitter/) to do AST parsing of the source and extract, classes, methods, reference and doc stings. Currenly limited to Python,Go and CPP source, but can easily extend to other languages that TreeSitter supports
 
@@ -37,8 +42,7 @@ A sample of this server is hosted in Hugging Face Spaces - "<https://alexcpn-cod
 Runs on `http://127.0.0.1:7860/mcp`
 
 ```
-cd code_ast_mcp_server/
-uv run http_server.py
+uv run codereview_mcp_server/http_server.py
 ```
 
 Check with MCP Insepctor
@@ -58,14 +62,14 @@ You can expose the above via Ngrok `ngrok http http://localhost:7860` to the Int
 STDIO Client will run the Server and query the tools
 
 ```
-uv run /ssd/nomoreagentsai/code_ast_mcp_server/stdio_client.py
+uv run codereview_mcp_server/stdio_client.py
 ```
 
 ## Use MCP Inspector to check
 
 Example
 ```
-npx @modelcontextprotocol/inspector   uv   --directory /ssd/nomoreagentsai/code_ast_mcp_server/   run   stdio_server.py
+npx @modelcontextprotocol/inspector   uv   --directory codereview_mcp_server/   run   stdio_server.py
 ```
 
 
@@ -84,7 +88,7 @@ For testing the logic/for development and extension
       "command": "uv",
       "args": [
         "--directory",
-        "/ssd/nomoreagentsai/code_ast_mcp_server",
+        "<add path>/codereview_mcp_server",
         "run",
         "stdio_server.py"
       ]
