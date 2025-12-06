@@ -30,7 +30,7 @@ Uses uv as the  package manager.
 
 Client call example in [Colab Notebook](https://colab.research.google.com/drive/11xryaGH28jpTSd-V2NJ3j5WQJLzr14j4#scrollTo=NRCZqhrb5Pn_)
 
-A sample of this server is hosted in Hugging Face Spaces - "<https://alexcpn-code-review-mcp-server.hf.space/mcp/>
+A sample of this server is hosted in Hugging Face Spaces - https://alexcpn-treesitter-mcp.hf.space/mcp/
 
 ---
 
