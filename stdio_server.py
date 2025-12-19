@@ -51,20 +51,7 @@ def search_codebase_mcp(
         max_results=max_results,
     )
     
-@mcp.tool()
-def get_pull_request_diff_mcp(repo_url, pr_number) -> dict[str, str]:   
-    """ 
-    Fetch per-file diffs for a given repo URL and PR number.
-    Get the git diff of the changes of all commits for the given pull/merge request number.
-    Args:
-        repo_url (str): The URL of the GitHub repository.
-        pr_number (int): The pull request number.
-    returns:
-        dict: A dictionary mapping changed file paths to their respective diffs.
-    """
-    
-    from tools.code_indexer import get_pr_diff_url as get_diff_util
-    return get_diff_util(repo_url, pr_number)
+
 
 if __name__ == "__main__":
     # Must NOT print anything.

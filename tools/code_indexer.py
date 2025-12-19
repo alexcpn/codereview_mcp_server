@@ -603,38 +603,6 @@ def get_function_context_for_project(function_name:str, github_repo:str,)-> str:
         return f"Error: {e}"
 
 
-def get_pr_diff_url(repo_url, pr_number)  -> dict[str, str]:   
-    """ 
-    Fetch per-file diffs for a given repo URL and PR number.
-    Get the git diff of the changes of all commits for the given pull/merge request number.
-    Args:
-        repo_url (str): The URL of the GitHub repository.
-        pr_number (int): The pull request number.
-    returns:
-    """
-    pr_diff_url = f"https://patch-diff.githubusercontent.com/raw/{repo_url.split('/')[-2]}/{repo_url.split('/')[-1]}/pull/{pr_number}.diff"
-    response = requests.get(pr_diff_url,verify=False)
-
-    if response.status_code != 200:
-        log.info(f"Failed to fetch diff: {response.status_code}")
-        exit()
-
-    if response.status_code != 200:
-        log.info(f"Failed to fetch diff: {response.status_code}")
-        exit()
-
-    diff_text = response.text
-    file_diffs = defaultdict(str)
-    file_diff_pattern = re.compile(r'^diff --git a/(.*?) b/\1$', re.MULTILINE)
-    split_points = list(file_diff_pattern.finditer(diff_text))
-    for i, match in enumerate(split_points):
-        file_path = match.group(1)
-        start = match.start()
-        end = split_points[i + 1].start() if i + 1 < len(split_points) else len(diff_text)
-        file_diffs[file_path] = diff_text[start:end]
-    return file_diffs
-
-
 
 if __name__ == "__main__":
 

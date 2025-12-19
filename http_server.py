@@ -41,19 +41,7 @@ def get_function_references_mcp(function_name: str, github_repo: str) -> str:
     print(f"Finding references for function: {function_name} in repo: {github_repo}")
     return find_function_calls_within_project(function_name, github_repo)
 
-@mcp.tool()
-def get_pull_request_diff_mcp(repo_url, pr_number) -> dict[str, str]:   
-    """ 
-    Fetch per-file diffs for a given repo URL and PR number.
-    Get the git diff of the changes of all commits for the given pull/merge request number.
-    Args:
-        repo_url (str): The URL of the GitHub repository.
-        pr_number (int): The pull request number.
-    returns:
-        dict: A dictionary mapping changed file paths to their respective diffs.
-    """
-    from tools.code_indexer import get_pr_diff_url as get_diff_util
-    return get_diff_util(repo_url, pr_number)
+
  
 @mcp.tool()
 def search_codebase_mcp(

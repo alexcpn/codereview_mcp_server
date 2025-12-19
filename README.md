@@ -21,8 +21,8 @@ Get the details of a function in a GitHub repo along with its callees.
 Get the references of a function in a GitHub repo.
 - search_codebase_mcp
 Search the repository for `term` and return matching lines in grep-like format.
-- get_pull_request_diff_mcp
-Fetch per-file diffs for a given repo URL and PR number. Get the git diff of the changes of all commits for the given pull/merge request number.
+
+Note: If the repository is not in the servers indexed cache it is git cloned with depth 1 and added. No need to explicityly register this
 
 The Server use the [TreeSitter project](https://tree-sitter.github.io/tree-sitter/) to do AST parsing of the source and extract, classes, methods, reference and doc stings. Currenly limited to Python,Go and CPP source, but can easily extend to other languages that TreeSitter supports
 
