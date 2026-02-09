@@ -67,33 +67,45 @@ def search_codebase_mcp(
 
 
 @mcp.tool()
-def index_folder_mcp(folder_path: str) -> str:
+def index_folder_mcp(folder_path: str, re_index: bool = False) -> str:
     """
     Index a local folder so the other tools can query it.
+
+    Indexed data is persisted to an SQLite cache on disk. On subsequent calls
+    (even after a server restart), the cached index is loaded instantly without
+    re-parsing. Pass ``re_index=True`` to discard the cache and force a fresh
+    re-index of the folder.
 
     After indexing, pass the same ``folder_path`` as the ``repo_name``
     parameter in get_function_context_for_project_mcp,
     get_function_references_mcp, or search_codebase_mcp.
 
     @param folder_path: Absolute or relative path to a local code directory.
+    @param re_index: If True, discard cached data and force a full re-index from disk. Defaults to False.
     """
     print(f"Indexing local folder: {folder_path}")
-    return index_local_folder(folder_path)
+    return index_local_folder(folder_path, re_index=re_index)
 
 
 @mcp.tool()
-def index_github_repo_mcp(github_url: str) -> str:
+def index_github_repo_mcp(github_url: str, re_index: bool = False) -> str:
     """
-    Clone a GitHub repo and index it for querying.
+    Clone a GitHub repo (shallow, depth=1) and index it for querying.
 
-    After indexing, use the returned folder path as the ``repo_name``
+    Indexed data is persisted to an SQLite cache on disk. On subsequent calls
+    (even after a server restart), the cached index is loaded instantly without
+    re-cloning. Pass ``re_index=True`` to discard the cache and force a fresh
+    clone and re-index.
+
+    After indexing, use the same ``github_url`` as the ``repo_name``
     parameter in get_function_context_for_project_mcp,
     get_function_references_mcp, or search_codebase_mcp.
 
     @param github_url: HTTPS URL of the GitHub repository.
+    @param re_index: If True, discard cached data and force a fresh clone and re-index. Defaults to False.
     """
     print(f"Indexing GitHub repo: {github_url}")
-    return index_github_repo(github_url)
+    return index_github_repo(github_url, re_index=re_index)
 
 
 if __name__ == "__main__":
