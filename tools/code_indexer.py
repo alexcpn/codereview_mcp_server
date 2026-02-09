@@ -502,29 +502,29 @@ def get_function_context(target_name,all_functions,github_url):
         contex += "\n" +src
         return contex
         
-def get_code_bytes(github_repo, file_name, start_bytes, end_bytes):
+def get_code_bytes(repo_name, file_name, start_bytes, end_bytes):
     """
     Get the code bytes for a specific file and byte range.
     """
-    if github_repo+file_name not in code_ref:
+    if repo_name+file_name not in code_ref:
         return (f"File {file_name} not found in code_ref.")
     # get the code bytes for the file
-    code_bytes = code_ref[github_repo+file_name]
+    code_bytes = code_ref[repo_name+file_name]
     # get the code bytes for the lines
     code_bytes = code_bytes[start_bytes:end_bytes]
     return code_bytes
 
 # find all calls to a specific function in the
-def find_function_calls_within_project(function_name,github_repo):
+def find_function_calls_within_project(function_name,repo_name):
     """
     Find all calls to `target_name` in a previously indexed project.
 
-    ``github_repo`` is used only as a cache key.  If the repo/folder has not
+    ``repo_name`` is used only as a cache key.  If the repo/folder has not
     been indexed yet, an error message is returned.
     """
-    if github_repo not in all_refs:
+    if repo_name not in all_refs:
         return (
-            f"Error: '{github_repo}' has not been indexed yet. "
+            f"Error: '{repo_name}' has not been indexed yet. "
             "Please call index_github_repo or index_local_folder first."
         )
 
@@ -532,7 +532,7 @@ def find_function_calls_within_project(function_name,github_repo):
     # get all keys of dict code_ref
     all_files = code_ref.keys()
     for name in all_files:
-        if name.startswith(github_repo):
+        if name.startswith(repo_name):
             code_bytes = code_ref[name]
             language = code_languages.get(name)
             calls = find_call_sites(code_bytes, function_name, language) if language else []
@@ -549,7 +549,7 @@ def find_function_calls_within_project(function_name,github_repo):
 
 def search_codebase_for_project(
     term: str,
-    github_repo: str,
+    repo_name: str,
     file_patterns=None,
     ignore_names=None,
     max_results: int = 200,
@@ -560,9 +560,9 @@ def search_codebase_for_project(
     if not term:
         return "Error: Search term must not be empty."
 
-    if github_repo not in all_refs:
+    if repo_name not in all_refs:
         return (
-            f"Error: '{github_repo}' has not been indexed yet. "
+            f"Error: '{repo_name}' has not been indexed yet. "
             "Please call index_github_repo or index_local_folder first."
         )
 
@@ -578,10 +578,10 @@ def search_codebase_for_project(
 
     matches = []
     for key, content_bytes in code_ref.items():
-        if not key.startswith(github_repo):
+        if not key.startswith(repo_name):
             continue
 
-        rel_path = key[len(github_repo):].lstrip("/\\")
+        rel_path = key[len(repo_name):].lstrip("/\\")
         display_path = rel_path or key
         path_obj = Path(rel_path) if rel_path else Path(display_path)
 
@@ -609,7 +609,7 @@ def index_local_folder(folder_path: str) -> str:
     """
     Index a local folder so the existing query tools can work with it.
 
-    After calling this, pass ``folder_path`` wherever ``github_repo`` is
+    After calling this, pass ``folder_path`` wherever ``repo_name`` is
     expected in the other helpers (get_function_context_for_project,
     find_function_calls_within_project, search_codebase_for_project).
 
@@ -659,25 +659,25 @@ def index_github_repo(github_url: str) -> str:
     return index_local_folder(tmp_dir)
 
 
-def get_function_context_for_project(function_name:str, github_repo:str,)-> str:
+def get_function_context_for_project(function_name:str, repo_name:str,)-> str:
     """
     Get the details of a function in a previously indexed repo or folder.
 
-    ``github_repo`` is used only as a cache key.  If the repo/folder has not
+    ``repo_name`` is used only as a cache key.  If the repo/folder has not
     been indexed yet (via ``index_github_repo`` or ``index_local_folder``),
     an error message is returned asking the caller to index first.
 
     @param function_name: The name of the function to find.
-    @param github_repo: Cache key (repo URL or folder path) returned by an earlier index call.
+    @param repo_name: Cache key (repo URL or folder path) returned by an earlier index call.
     """
-    if github_repo not in all_refs:
+    if repo_name not in all_refs:
         return (
-            f"Error: '{github_repo}' has not been indexed yet. "
+            f"Error: '{repo_name}' has not been indexed yet. "
             "Please call index_github_repo or index_local_folder first."
         )
     try:
-        all_functions = all_refs[github_repo]["functions"]
-        contex = get_function_context(function_name, all_functions, github_repo)
+        all_functions = all_refs[repo_name]["functions"]
+        contex = get_function_context(function_name, all_functions, repo_name)
         return contex
     except Exception as e:
         return f"Error: {e}"

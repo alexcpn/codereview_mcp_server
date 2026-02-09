@@ -22,7 +22,7 @@ The MCP server exposes multiple tools implemented in [tools/code_indexer.py](/to
 - **get_function_references_mcp** — Get the references of a function in the indexed codebase.
 - **search_codebase_mcp** — Search the repository for a term and return matching lines in grep-like format.
 
-**Note:** You must first index a repo or folder (via `index_github_repo_mcp` or `index_folder_mcp`) before querying it with the other tools. The returned folder path / key should be passed as the `github_repo` parameter to the query tools.
+**Note:** You must first index a repo or folder (via `index_github_repo_mcp` or `index_folder_mcp`) before querying it with the other tools. The returned folder path / key should be passed as the `repo_name` parameter to the query tools.
 
 The Server use the [TreeSitter project](https://tree-sitter.github.io/tree-sitter/) to do AST parsing of the source and extract, classes, methods, reference and doc stings. Currenly limited to Python,Go and CPP source, but can easily extend to other languages that TreeSitter supports
 
