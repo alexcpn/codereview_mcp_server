@@ -98,21 +98,17 @@ class TestIndexGithubRepo:
         assert "class(es)" in result
 
     def test_index_github_repo_populates_cache(self):
-        """After indexing, all_refs should contain an entry keyed by the temp folder path."""
-        result = index_github_repo(GITHUB_REPO)
-        # The cache key is the temp folder path (not the URL).
-        # Find the entry that was just added.
-        assert len(all_refs) == 1
-        folder_key = next(iter(all_refs))
-        cached = all_refs[folder_key]
+        """After indexing, all_refs should be keyed by the github URL."""
+        index_github_repo(GITHUB_REPO)
+        assert GITHUB_REPO in all_refs
+        cached = all_refs[GITHUB_REPO]
         assert len(cached["functions"]) > 0
         assert len(cached["classes"]) > 0
 
     def test_query_after_index_github_repo(self):
-        """Query tools should work against the cloned repo."""
+        """Query tools should work using the github URL as repo_name."""
         index_github_repo(GITHUB_REPO)
-        folder_key = next(iter(all_refs))
-        context = get_function_context_for_project("index_all_files", folder_key)
+        context = get_function_context_for_project("index_all_files", GITHUB_REPO)
         assert context is not None
         assert "index_all_files" in context
 

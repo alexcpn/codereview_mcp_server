@@ -12,16 +12,17 @@ import tempfile
 from git import Repo
 from enum import Enum
 import logging as log
-import requests
-import re
-from collections import defaultdict
 
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "log")
+os.makedirs(_LOG_DIR, exist_ok=True)
 
 log.basicConfig(
     level=log.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",  #
-    # format="[%(levelname)s] %(message)s",  # dont need timing
-    handlers=[log.StreamHandler()],
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        log.StreamHandler(),
+        log.FileHandler(os.path.join(_LOG_DIR, "code_indexer.log")),
+    ],
     force=True,
 )
 
@@ -643,20 +644,38 @@ def index_local_folder(folder_path: str) -> str:
 
 def index_github_repo(github_url: str) -> str:
     """
-    Clone a GitHub repo (shallow, depth=1) into a temp directory and index it
-    by delegating to ``index_local_folder``.
+    Clone a GitHub repo (shallow, depth=1) into a temp directory and index it.
 
-    The temp directory is NOT cleaned up immediately because ``code_ref`` holds
-    references to the indexed bytes keyed by the folder path.
+    The cache is keyed by ``github_url`` so callers can pass the same URL as
+    ``repo_name`` to the query helpers.
+
+    The temp directory is NOT cleaned up because ``code_ref`` holds references
+    to the indexed bytes.
 
     @param github_url: HTTPS URL of the GitHub repository.
-    @return: Summary string from ``index_local_folder``.
+    @return: Summary string with counts of files, classes, and functions indexed.
     """
+    if github_url in all_refs:
+        cached = all_refs[github_url]
+        n_cls = len(cached["classes"])
+        n_fn = len(cached["functions"])
+        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
     tmp_dir = tempfile.mkdtemp(prefix="codereview_")
     log.info(f"Cloning {github_url} into {tmp_dir} (depth=1) ...")
     Repo.clone_from(github_url, tmp_dir, depth=1)
     log.info(f"Cloned. Indexing {tmp_dir} ...")
-    return index_local_folder(tmp_dir)
+
+    all_classes, all_functions = index_all_files(tmp_dir, github_url)
+    all_refs[github_url] = {"classes": all_classes, "functions": all_functions}
+
+    indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+    summary = (
+        f"Indexed {len(indexed_files)} file(s): "
+        f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+    )
+    log.info(summary)
+    return summary
 
 
 def get_function_context_for_project(function_name:str, repo_name:str,)-> str:
