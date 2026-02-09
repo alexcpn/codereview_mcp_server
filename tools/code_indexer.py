@@ -4,7 +4,7 @@ Code to create for a Code Reivew tool helper for  MCP server
 License: Proprietary
 """
 
-import os, textwrap
+import os, textwrap, sqlite3
 from pathlib import Path
 from tree_sitter_languages import  get_language
 from tree_sitter import Parser
@@ -32,6 +32,156 @@ parser   = Parser()
 all_refs = {}  # store all classes and functions in a dict
 code_ref ={} # hold the code bytes
 code_languages = {}  # track language per file for downstream queries
+
+# ---------------------------------------------------------------------------
+#  SQLite cache for persisting indexed data across restarts
+# ---------------------------------------------------------------------------
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache")
+os.makedirs(_CACHE_DIR, exist_ok=True)
+_DB_PATH = os.path.join(_CACHE_DIR, "index_cache.db")
+
+
+def _init_db():
+    """Create cache tables if they don't exist."""
+    con = sqlite3.connect(_DB_PATH)
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS repos (
+            repo_name  TEXT PRIMARY KEY,
+            indexed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS files (
+            repo_name TEXT NOT NULL,
+            rel_path  TEXT NOT NULL,
+            language  TEXT NOT NULL,
+            content   BLOB NOT NULL,
+            PRIMARY KEY (repo_name, rel_path)
+        );
+        CREATE TABLE IF NOT EXISTS symbols (
+            repo_name   TEXT NOT NULL,
+            rel_path    TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            start_byte  INTEGER NOT NULL,
+            end_byte    INTEGER NOT NULL,
+            start_line  INTEGER NOT NULL,
+            end_line    INTEGER NOT NULL,
+            class_name  TEXT,
+            doc         TEXT,
+            FOREIGN KEY (repo_name, rel_path) REFERENCES files(repo_name, rel_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_symbols_repo ON symbols(repo_name);
+        CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(repo_name, name);
+    """)
+    con.close()
+
+
+def _save_to_cache(repo_name, all_classes, all_functions):
+    """Persist indexed data to SQLite."""
+    _init_db()
+    con = sqlite3.connect(_DB_PATH)
+    cur = con.cursor()
+    try:
+        # clear old data for this repo
+        cur.execute("DELETE FROM symbols WHERE repo_name = ?", (repo_name,))
+        cur.execute("DELETE FROM files WHERE repo_name = ?", (repo_name,))
+        cur.execute("DELETE FROM repos WHERE repo_name = ?", (repo_name,))
+
+        cur.execute("INSERT INTO repos (repo_name, indexed_at) VALUES (?, datetime('now'))",
+                     (repo_name,))
+
+        # collect files from code_ref
+        for key, content_bytes in code_ref.items():
+            if not key.startswith(repo_name):
+                continue
+            rel_path = key[len(repo_name):]
+            language = code_languages.get(key, "")
+            cur.execute("INSERT OR REPLACE INTO files (repo_name, rel_path, language, content) VALUES (?, ?, ?, ?)",
+                         (repo_name, rel_path, language, content_bytes))
+
+        # save symbols
+        for item in all_classes:
+            cur.execute(
+                "INSERT INTO symbols (repo_name, rel_path, kind, name, start_byte, end_byte, start_line, end_line, class_name, doc) "
+                "VALUES (?, ?, 'class', ?, ?, ?, ?, ?, ?, ?)",
+                (repo_name, item["file"], item["name"],
+                 item["start_byte"], item["end_byte"],
+                 item["start_line"], item["end_line"],
+                 item.get("class"), item.get("doc")),
+            )
+        for item in all_functions:
+            cur.execute(
+                "INSERT INTO symbols (repo_name, rel_path, kind, name, start_byte, end_byte, start_line, end_line, class_name, doc) "
+                "VALUES (?, ?, 'function', ?, ?, ?, ?, ?, ?, ?)",
+                (repo_name, item["file"], item["name"],
+                 item["start_byte"], item["end_byte"],
+                 item["start_line"], item["end_line"],
+                 item.get("class"), item.get("doc")),
+            )
+        con.commit()
+    finally:
+        con.close()
+    log.info(f"Saved cache for '{repo_name}' ({len(all_classes)} classes, {len(all_functions)} functions)")
+
+
+def _load_from_cache(repo_name):
+    """
+    Try to restore indexed data from SQLite cache.
+    Returns (all_classes, all_functions) or None if not cached.
+    Populates all_refs, code_ref, and code_languages as a side effect.
+    """
+    _init_db()
+    con = sqlite3.connect(_DB_PATH)
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT 1 FROM repos WHERE repo_name = ?", (repo_name,))
+        if cur.fetchone() is None:
+            return None
+
+        # restore files → code_ref and code_languages
+        cur.execute("SELECT rel_path, language, content FROM files WHERE repo_name = ?",
+                     (repo_name,))
+        for rel_path, language, content in cur.fetchall():
+            key = repo_name + rel_path
+            code_ref[key] = bytes(content) if not isinstance(content, bytes) else content
+            code_languages[key] = language
+
+        # restore symbols
+        all_classes = []
+        all_functions = []
+        cur.execute(
+            "SELECT kind, rel_path, name, start_byte, end_byte, start_line, end_line, class_name, doc "
+            "FROM symbols WHERE repo_name = ?",
+            (repo_name,),
+        )
+        for kind, rel_path, name, sb, eb, sl, el, class_name, doc in cur.fetchall():
+            item = {
+                "name": name,
+                "file": rel_path,
+                "start_byte": sb,
+                "end_byte": eb,
+                "start_line": sl,
+                "end_line": el,
+                "class": class_name,
+                "doc": doc,
+            }
+            if kind == "class":
+                all_classes.append(item)
+            else:
+                all_functions.append(item)
+
+        all_refs[repo_name] = {"classes": all_classes, "functions": all_functions}
+        log.info(f"Loaded cache for '{repo_name}' ({len(all_classes)} classes, {len(all_functions)} functions)")
+        return all_classes, all_functions
+    finally:
+        con.close()
+
+
+def _strip_nodes(all_classes, all_functions):
+    """Replace tree-sitter Node objects with plain byte-position ints."""
+    for item in all_classes + all_functions:
+        node = item.pop("node")
+        item["start_byte"] = node.start_byte
+        item["end_byte"] = node.end_byte
 
 DEFAULT_SEARCH_IGNORES: tuple[str, ...] = (
     # Version control
@@ -484,7 +634,7 @@ def get_function_context(target_name,all_functions,github_url):
     matches     = [fn for fn in all_functions if fn["name"] == target_name]
     log.info(f"\n\nFound {len(matches)} matches for '{target_name}':")
     for fn in matches:
-        start, end = fn["node"].start_byte, fn["node"].end_byte
+        start, end = fn["start_byte"], fn["end_byte"]
         file_name  = fn["file"]
         code_bytes    = code_ref[github_url+file_name]
         raw_src    = code_bytes[start:end].decode()
@@ -524,10 +674,11 @@ def find_function_calls_within_project(function_name,repo_name):
     been indexed yet, an error message is returned.
     """
     if repo_name not in all_refs:
-        return (
-            f"Error: '{repo_name}' has not been indexed yet. "
-            "Please call index_github_repo or index_local_folder first."
-        )
+        if _load_from_cache(repo_name) is None:
+            return (
+                f"Error: '{repo_name}' has not been indexed yet. "
+                "Please call index_github_repo or index_local_folder first."
+            )
 
     contexts = " "
     # get all keys of dict code_ref
@@ -562,10 +713,11 @@ def search_codebase_for_project(
         return "Error: Search term must not be empty."
 
     if repo_name not in all_refs:
-        return (
-            f"Error: '{repo_name}' has not been indexed yet. "
-            "Please call index_github_repo or index_local_folder first."
-        )
+        if _load_from_cache(repo_name) is None:
+            return (
+                f"Error: '{repo_name}' has not been indexed yet. "
+                "Please call index_github_repo or index_local_folder first."
+            )
 
     normalized_term = term.lower()
     ignore_set = set(DEFAULT_SEARCH_IGNORES)
@@ -606,7 +758,7 @@ def search_codebase_for_project(
 
     return "\n".join(matches)
 
-def index_local_folder(folder_path: str) -> str:
+def index_local_folder(folder_path: str, re_index: bool = False) -> str:
     """
     Index a local folder so the existing query tools can work with it.
 
@@ -615,21 +767,35 @@ def index_local_folder(folder_path: str) -> str:
     find_function_calls_within_project, search_codebase_for_project).
 
     @param folder_path: Absolute or relative path to a local code directory.
+    @param re_index: If True, force re-indexing even if already cached.
     @return: Summary string with counts of files, classes, and functions indexed.
     """
     folder_path = os.path.abspath(folder_path)
     if not os.path.isdir(folder_path):
         return f"Error: '{folder_path}' is not a valid directory."
 
-    if folder_path in all_refs:
-        cached = all_refs[folder_path]
-        n_cls = len(cached["classes"])
-        n_fn = len(cached["functions"])
-        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+    if not re_index:
+        if folder_path in all_refs:
+            cached = all_refs[folder_path]
+            n_cls = len(cached["classes"])
+            n_fn = len(cached["functions"])
+            return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
+        # try SQLite cache before doing a full index
+        cached_result = _load_from_cache(folder_path)
+        if cached_result is not None:
+            all_classes, all_functions = cached_result
+            indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+            return (
+                f"Indexed {len(indexed_files)} file(s): "
+                f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+            )
 
     log.info(f"Indexing local folder {folder_path} ...")
     all_classes, all_functions = index_all_files(folder_path, folder_path)
+    _strip_nodes(all_classes, all_functions)
     all_refs[folder_path] = {"classes": all_classes, "functions": all_functions}
+    _save_to_cache(folder_path, all_classes, all_functions)
 
     # count distinct files that were indexed
     indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
@@ -642,7 +808,7 @@ def index_local_folder(folder_path: str) -> str:
     return summary
 
 
-def index_github_repo(github_url: str) -> str:
+def index_github_repo(github_url: str, re_index: bool = False) -> str:
     """
     Clone a GitHub repo (shallow, depth=1) into a temp directory and index it.
 
@@ -653,13 +819,25 @@ def index_github_repo(github_url: str) -> str:
     to the indexed bytes.
 
     @param github_url: HTTPS URL of the GitHub repository.
+    @param re_index: If True, force re-cloning and re-indexing even if already cached.
     @return: Summary string with counts of files, classes, and functions indexed.
     """
-    if github_url in all_refs:
-        cached = all_refs[github_url]
-        n_cls = len(cached["classes"])
-        n_fn = len(cached["functions"])
-        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+    if not re_index:
+        if github_url in all_refs:
+            cached = all_refs[github_url]
+            n_cls = len(cached["classes"])
+            n_fn = len(cached["functions"])
+            return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
+        # try SQLite cache before cloning
+        cached_result = _load_from_cache(github_url)
+        if cached_result is not None:
+            all_classes, all_functions = cached_result
+            indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+            return (
+                f"Indexed {len(indexed_files)} file(s): "
+                f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+            )
 
     tmp_dir = tempfile.mkdtemp(prefix="codereview_")
     log.info(f"Cloning {github_url} into {tmp_dir} (depth=1) ...")
@@ -667,7 +845,9 @@ def index_github_repo(github_url: str) -> str:
     log.info(f"Cloned. Indexing {tmp_dir} ...")
 
     all_classes, all_functions = index_all_files(tmp_dir, github_url)
+    _strip_nodes(all_classes, all_functions)
     all_refs[github_url] = {"classes": all_classes, "functions": all_functions}
+    _save_to_cache(github_url, all_classes, all_functions)
 
     indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
     summary = (
@@ -690,10 +870,11 @@ def get_function_context_for_project(function_name:str, repo_name:str,)-> str:
     @param repo_name: Cache key (repo URL or folder path) returned by an earlier index call.
     """
     if repo_name not in all_refs:
-        return (
-            f"Error: '{repo_name}' has not been indexed yet. "
-            "Please call index_github_repo or index_local_folder first."
-        )
+        if _load_from_cache(repo_name) is None:
+            return (
+                f"Error: '{repo_name}' has not been indexed yet. "
+                "Please call index_github_repo or index_local_folder first."
+            )
     try:
         all_functions = all_refs[repo_name]["functions"]
         contex = get_function_context(function_name, all_functions, repo_name)
