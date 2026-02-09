@@ -16,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
 
 from tools.code_indexer import (
     index_local_folder,
+    index_github_repo,
     get_function_context_for_project,
     find_function_calls_within_project,
     search_codebase_for_project,
@@ -80,6 +81,40 @@ class TestIndexLocalFolder:
         abs_tools = os.path.abspath(TOOLS_DIR)
         results = search_codebase_for_project("def index_all_files", abs_tools)
         assert "index_all_files" in results
+
+
+GITHUB_REPO = "https://github.com/alexcpn/codereview_mcp_server"
+
+
+class TestIndexGithubRepo:
+    def setup_method(self):
+        _clear_caches()
+
+    def test_index_github_repo_clones_and_indexes(self):
+        """Clone a real repo and verify indexing produces a valid summary."""
+        result = index_github_repo(GITHUB_REPO)
+        assert "Indexed" in result
+        assert "function(s)" in result
+        assert "class(es)" in result
+
+    def test_index_github_repo_populates_cache(self):
+        """After indexing, all_refs should contain an entry keyed by the temp folder path."""
+        result = index_github_repo(GITHUB_REPO)
+        # The cache key is the temp folder path (not the URL).
+        # Find the entry that was just added.
+        assert len(all_refs) == 1
+        folder_key = next(iter(all_refs))
+        cached = all_refs[folder_key]
+        assert len(cached["functions"]) > 0
+        assert len(cached["classes"]) > 0
+
+    def test_query_after_index_github_repo(self):
+        """Query tools should work against the cloned repo."""
+        index_github_repo(GITHUB_REPO)
+        folder_key = next(iter(all_refs))
+        context = get_function_context_for_project("index_all_files", folder_key)
+        assert context is not None
+        assert "index_all_files" in context
 
 
 if __name__ == "__main__":

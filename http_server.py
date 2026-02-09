@@ -14,6 +14,7 @@ from tools.code_indexer import (
     find_function_calls_within_project,
     search_codebase_for_project,
     index_local_folder,
+    index_github_repo,
 )
 
 mcp = FastMCP()
@@ -78,6 +79,21 @@ def index_folder_mcp(folder_path: str) -> str:
     """
     print(f"Indexing local folder: {folder_path}")
     return index_local_folder(folder_path)
+
+
+@mcp.tool()
+def index_github_repo_mcp(github_url: str) -> str:
+    """
+    Clone a GitHub repo and index it for querying.
+
+    After indexing, use the returned folder path as the ``github_repo``
+    parameter in get_function_context_for_project_mcp,
+    get_function_references_mcp, or search_codebase_mcp.
+
+    @param github_url: HTTPS URL of the GitHub repository.
+    """
+    print(f"Indexing GitHub repo: {github_url}")
+    return index_github_repo(github_url)
 
 
 if __name__ == "__main__":

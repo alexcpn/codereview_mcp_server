@@ -98,22 +98,6 @@ def _decode_text(content_bytes: bytes):
             return None
 
 
-def _ensure_repo_indexed(github_repo: str):
-    if github_repo in all_refs:
-        cached = all_refs[github_repo]
-        return cached["classes"], cached["functions"]
-
-    with tempfile.TemporaryDirectory() as project_root:
-        log.info(f"Cloning repo {github_repo} into {project_root}...")
-        Repo.clone_from(github_repo, project_root, depth=1)
-        log.info(f"Cloned repo {github_repo} into {project_root}.")
-        log.info(f"Indexing files in {project_root}...")
-        all_classes, all_functions = index_all_files(project_root, github_repo)
-        log.info(f"Indexed {len(all_classes)} classes and {len(all_functions)} functions.")
-
-    all_refs[github_repo] = {"classes": all_classes, "functions": all_functions}
-    return all_classes, all_functions
-
 
 # ---------------------------------------------------------------------------
 # Language queries from https://github.com/sankalp1999/code_qa/blob/fe6ce9d852aa1c371c299db22978012df4b354a0/treesitter.py#L16
@@ -533,12 +517,16 @@ def get_code_bytes(github_repo, file_name, start_bytes, end_bytes):
 # find all calls to a specific function in the
 def find_function_calls_within_project(function_name,github_repo):
     """
-    Find all calls to `target_name` in the project.
+    Find all calls to `target_name` in a previously indexed project.
+
+    ``github_repo`` is used only as a cache key.  If the repo/folder has not
+    been indexed yet, an error message is returned.
     """
-    try:
-        _ensure_repo_indexed(github_repo)
-    except Exception as e:
-        return f"Error: {e}"
+    if github_repo not in all_refs:
+        return (
+            f"Error: '{github_repo}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
 
     contexts = " "
     # get all keys of dict code_ref
@@ -572,10 +560,11 @@ def search_codebase_for_project(
     if not term:
         return "Error: Search term must not be empty."
 
-    try:
-        _ensure_repo_indexed(github_repo)
-    except Exception as e:
-        return f"Error: {e}"
+    if github_repo not in all_refs:
+        return (
+            f"Error: '{github_repo}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
 
     normalized_term = term.lower()
     ignore_set = set(DEFAULT_SEARCH_IGNORES)
@@ -652,17 +641,43 @@ def index_local_folder(folder_path: str) -> str:
     return summary
 
 
+def index_github_repo(github_url: str) -> str:
+    """
+    Clone a GitHub repo (shallow, depth=1) into a temp directory and index it
+    by delegating to ``index_local_folder``.
+
+    The temp directory is NOT cleaned up immediately because ``code_ref`` holds
+    references to the indexed bytes keyed by the folder path.
+
+    @param github_url: HTTPS URL of the GitHub repository.
+    @return: Summary string from ``index_local_folder``.
+    """
+    tmp_dir = tempfile.mkdtemp(prefix="codereview_")
+    log.info(f"Cloning {github_url} into {tmp_dir} (depth=1) ...")
+    Repo.clone_from(github_url, tmp_dir, depth=1)
+    log.info(f"Cloned. Indexing {tmp_dir} ...")
+    return index_local_folder(tmp_dir)
+
+
 def get_function_context_for_project(function_name:str, github_repo:str,)-> str:
     """
-    Get the details of a function in a GitHub repo along with its callees.
-    
+    Get the details of a function in a previously indexed repo or folder.
+
+    ``github_repo`` is used only as a cache key.  If the repo/folder has not
+    been indexed yet (via ``index_github_repo`` or ``index_local_folder``),
+    an error message is returned asking the caller to index first.
+
     @param function_name: The name of the function to find.
-    @param github_repo: The URL of the GitHub repo.
-    @param project_root: The root directory of the project.
+    @param github_repo: Cache key (repo URL or folder path) returned by an earlier index call.
     """
+    if github_repo not in all_refs:
+        return (
+            f"Error: '{github_repo}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
     try:
-        _, all_functions = _ensure_repo_indexed(github_repo)
-        contex = get_function_context(function_name,all_functions,github_repo)
+        all_functions = all_refs[github_repo]["functions"]
+        contex = get_function_context(function_name, all_functions, github_repo)
         return contex
     except Exception as e:
         return f"Error: {e}"

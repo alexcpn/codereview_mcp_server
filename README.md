@@ -10,19 +10,19 @@ pinned: false
 
 # MCP Server Exposing Repo Code details
 
-### An MCP Server that provides the context for effective code-review of Pyhton and Go GitHub Repos
+### An MCP Server that provides the context for effective code-review of Python, Go and C++ GitHub Repos
 
 MCP is the Model Context Protocol that is used to expose APIs to LLMs, both API description as well as a way to call the API through JSON-RPC.
 
-The MCP server exposes multiple tools implemented in [tools\code_indexer.py](/tools/code_indexer.py):
-- get_function_context_for_project_mcp
-Get the details of a function in a GitHub repo along with its callees.
-- get_function_references_mcp
-Get the references of a function in a GitHub repo.
-- search_codebase_mcp
-Search the repository for `term` and return matching lines in grep-like format.
+The MCP server exposes multiple tools implemented in [tools/code_indexer.py](/tools/code_indexer.py):
 
-Note: If the repository is not in the servers indexed cache it is git cloned with depth 1 and added. No need to explicityly register this
+- **index_github_repo_mcp** — Clone a GitHub repo (shallow, depth=1) and index it for querying.
+- **index_folder_mcp** — Index a local folder so the other tools can query it.
+- **get_function_context_for_project_mcp** — Get the details of a function along with its callees.
+- **get_function_references_mcp** — Get the references of a function in the indexed codebase.
+- **search_codebase_mcp** — Search the repository for a term and return matching lines in grep-like format.
+
+**Note:** You must first index a repo or folder (via `index_github_repo_mcp` or `index_folder_mcp`) before querying it with the other tools. The returned folder path / key should be passed as the `github_repo` parameter to the query tools.
 
 The Server use the [TreeSitter project](https://tree-sitter.github.io/tree-sitter/) to do AST parsing of the source and extract, classes, methods, reference and doc stings. Currenly limited to Python,Go and CPP source, but can easily extend to other languages that TreeSitter supports
 
