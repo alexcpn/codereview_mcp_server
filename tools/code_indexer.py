@@ -33,15 +33,42 @@ code_ref ={} # hold the code bytes
 code_languages = {}  # track language per file for downstream queries
 
 DEFAULT_SEARCH_IGNORES: tuple[str, ...] = (
+    # Version control
     ".git",
     ".hg",
     ".svn",
-    ".mypy_cache",
+    # Python
+    ".venv",
+    "venv",
+    "env",
+    ".env",
     "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "*.egg-info",
+    # JavaScript / Node
     "node_modules",
+    # Java / Kotlin
+    ".gradle",
+    ".mvn",
+    "target",
+    # Go
+    "vendor",
+    # C / C++
+    "cmake-build-debug",
+    "cmake-build-release",
+    # General build / output
     "dist",
     "build",
-    ".venv",
+    "out",
+    "bin",
+    "obj",
+    # IDE / editor
+    ".idea",
+    ".vscode",
+    ".eclipse",
+    ".settings",
 )
 
 LANGUAGE_NAME_MAP = {
@@ -52,7 +79,9 @@ LANGUAGE_NAME_MAP = {
 
 def _collect_files(root_dir, extensions=None):
     all_files = []
-    for dirpath, _, filenames in os.walk(root_dir):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # Prune ignored directories in-place so os.walk won't descend into them
+        dirnames[:] = [d for d in dirnames if d not in DEFAULT_SEARCH_IGNORES]
         for fname in filenames:
             if extensions is None or any(fname.endswith(ext) for ext in extensions):
                 all_files.append(os.path.join(dirpath, fname))
@@ -586,6 +615,42 @@ def search_codebase_for_project(
         return "No matches found."
 
     return "\n".join(matches)
+
+def index_local_folder(folder_path: str) -> str:
+    """
+    Index a local folder so the existing query tools can work with it.
+
+    After calling this, pass ``folder_path`` wherever ``github_repo`` is
+    expected in the other helpers (get_function_context_for_project,
+    find_function_calls_within_project, search_codebase_for_project).
+
+    @param folder_path: Absolute or relative path to a local code directory.
+    @return: Summary string with counts of files, classes, and functions indexed.
+    """
+    folder_path = os.path.abspath(folder_path)
+    if not os.path.isdir(folder_path):
+        return f"Error: '{folder_path}' is not a valid directory."
+
+    if folder_path in all_refs:
+        cached = all_refs[folder_path]
+        n_cls = len(cached["classes"])
+        n_fn = len(cached["functions"])
+        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
+    log.info(f"Indexing local folder {folder_path} ...")
+    all_classes, all_functions = index_all_files(folder_path, folder_path)
+    all_refs[folder_path] = {"classes": all_classes, "functions": all_functions}
+
+    # count distinct files that were indexed
+    indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+
+    summary = (
+        f"Indexed {len(indexed_files)} file(s): "
+        f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+    )
+    log.info(summary)
+    return summary
+
 
 def get_function_context_for_project(function_name:str, github_repo:str,)-> str:
     """
