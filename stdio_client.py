@@ -160,7 +160,7 @@ def main():
             "name": "search_codebase_mcp",
             "arguments": {
                 "term": "parse_yaml_response_with_repair",
-                "github_repo": "https://github.com/alexcpn/noagent-ai",
+                "repo_name": "https://github.com/alexcpn/noagent-ai",
             },
         },
         id=30,

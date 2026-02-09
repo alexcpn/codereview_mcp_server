@@ -12,16 +12,17 @@ import tempfile
 from git import Repo
 from enum import Enum
 import logging as log
-import requests
-import re
-from collections import defaultdict
 
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "log")
+os.makedirs(_LOG_DIR, exist_ok=True)
 
 log.basicConfig(
     level=log.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",  #
-    # format="[%(levelname)s] %(message)s",  # dont need timing
-    handlers=[log.StreamHandler()],
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        log.StreamHandler(),
+        log.FileHandler(os.path.join(_LOG_DIR, "code_indexer.log")),
+    ],
     force=True,
 )
 
@@ -33,15 +34,42 @@ code_ref ={} # hold the code bytes
 code_languages = {}  # track language per file for downstream queries
 
 DEFAULT_SEARCH_IGNORES: tuple[str, ...] = (
+    # Version control
     ".git",
     ".hg",
     ".svn",
-    ".mypy_cache",
+    # Python
+    ".venv",
+    "venv",
+    "env",
+    ".env",
     "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "*.egg-info",
+    # JavaScript / Node
     "node_modules",
+    # Java / Kotlin
+    ".gradle",
+    ".mvn",
+    "target",
+    # Go
+    "vendor",
+    # C / C++
+    "cmake-build-debug",
+    "cmake-build-release",
+    # General build / output
     "dist",
     "build",
-    ".venv",
+    "out",
+    "bin",
+    "obj",
+    # IDE / editor
+    ".idea",
+    ".vscode",
+    ".eclipse",
+    ".settings",
 )
 
 LANGUAGE_NAME_MAP = {
@@ -52,7 +80,9 @@ LANGUAGE_NAME_MAP = {
 
 def _collect_files(root_dir, extensions=None):
     all_files = []
-    for dirpath, _, filenames in os.walk(root_dir):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # Prune ignored directories in-place so os.walk won't descend into them
+        dirnames[:] = [d for d in dirnames if d not in DEFAULT_SEARCH_IGNORES]
         for fname in filenames:
             if extensions is None or any(fname.endswith(ext) for ext in extensions):
                 all_files.append(os.path.join(dirpath, fname))
@@ -68,22 +98,6 @@ def _decode_text(content_bytes: bytes):
         except UnicodeDecodeError:
             return None
 
-
-def _ensure_repo_indexed(github_repo: str):
-    if github_repo in all_refs:
-        cached = all_refs[github_repo]
-        return cached["classes"], cached["functions"]
-
-    with tempfile.TemporaryDirectory() as project_root:
-        log.info(f"Cloning repo {github_repo} into {project_root}...")
-        Repo.clone_from(github_repo, project_root, depth=1)
-        log.info(f"Cloned repo {github_repo} into {project_root}.")
-        log.info(f"Indexing files in {project_root}...")
-        all_classes, all_functions = index_all_files(project_root, github_repo)
-        log.info(f"Indexed {len(all_classes)} classes and {len(all_functions)} functions.")
-
-    all_refs[github_repo] = {"classes": all_classes, "functions": all_functions}
-    return all_classes, all_functions
 
 
 # ---------------------------------------------------------------------------
@@ -489,33 +503,37 @@ def get_function_context(target_name,all_functions,github_url):
         contex += "\n" +src
         return contex
         
-def get_code_bytes(github_repo, file_name, start_bytes, end_bytes):
+def get_code_bytes(repo_name, file_name, start_bytes, end_bytes):
     """
     Get the code bytes for a specific file and byte range.
     """
-    if github_repo+file_name not in code_ref:
+    if repo_name+file_name not in code_ref:
         return (f"File {file_name} not found in code_ref.")
     # get the code bytes for the file
-    code_bytes = code_ref[github_repo+file_name]
+    code_bytes = code_ref[repo_name+file_name]
     # get the code bytes for the lines
     code_bytes = code_bytes[start_bytes:end_bytes]
     return code_bytes
 
 # find all calls to a specific function in the
-def find_function_calls_within_project(function_name,github_repo):
+def find_function_calls_within_project(function_name,repo_name):
     """
-    Find all calls to `target_name` in the project.
+    Find all calls to `target_name` in a previously indexed project.
+
+    ``repo_name`` is used only as a cache key.  If the repo/folder has not
+    been indexed yet, an error message is returned.
     """
-    try:
-        _ensure_repo_indexed(github_repo)
-    except Exception as e:
-        return f"Error: {e}"
+    if repo_name not in all_refs:
+        return (
+            f"Error: '{repo_name}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
 
     contexts = " "
     # get all keys of dict code_ref
     all_files = code_ref.keys()
     for name in all_files:
-        if name.startswith(github_repo):
+        if name.startswith(repo_name):
             code_bytes = code_ref[name]
             language = code_languages.get(name)
             calls = find_call_sites(code_bytes, function_name, language) if language else []
@@ -532,7 +550,7 @@ def find_function_calls_within_project(function_name,github_repo):
 
 def search_codebase_for_project(
     term: str,
-    github_repo: str,
+    repo_name: str,
     file_patterns=None,
     ignore_names=None,
     max_results: int = 200,
@@ -543,10 +561,11 @@ def search_codebase_for_project(
     if not term:
         return "Error: Search term must not be empty."
 
-    try:
-        _ensure_repo_indexed(github_repo)
-    except Exception as e:
-        return f"Error: {e}"
+    if repo_name not in all_refs:
+        return (
+            f"Error: '{repo_name}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
 
     normalized_term = term.lower()
     ignore_set = set(DEFAULT_SEARCH_IGNORES)
@@ -560,10 +579,10 @@ def search_codebase_for_project(
 
     matches = []
     for key, content_bytes in code_ref.items():
-        if not key.startswith(github_repo):
+        if not key.startswith(repo_name):
             continue
 
-        rel_path = key[len(github_repo):].lstrip("/\\")
+        rel_path = key[len(repo_name):].lstrip("/\\")
         display_path = rel_path or key
         path_obj = Path(rel_path) if rel_path else Path(display_path)
 
@@ -587,17 +606,97 @@ def search_codebase_for_project(
 
     return "\n".join(matches)
 
-def get_function_context_for_project(function_name:str, github_repo:str,)-> str:
+def index_local_folder(folder_path: str) -> str:
     """
-    Get the details of a function in a GitHub repo along with its callees.
-    
+    Index a local folder so the existing query tools can work with it.
+
+    After calling this, pass ``folder_path`` wherever ``repo_name`` is
+    expected in the other helpers (get_function_context_for_project,
+    find_function_calls_within_project, search_codebase_for_project).
+
+    @param folder_path: Absolute or relative path to a local code directory.
+    @return: Summary string with counts of files, classes, and functions indexed.
+    """
+    folder_path = os.path.abspath(folder_path)
+    if not os.path.isdir(folder_path):
+        return f"Error: '{folder_path}' is not a valid directory."
+
+    if folder_path in all_refs:
+        cached = all_refs[folder_path]
+        n_cls = len(cached["classes"])
+        n_fn = len(cached["functions"])
+        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
+    log.info(f"Indexing local folder {folder_path} ...")
+    all_classes, all_functions = index_all_files(folder_path, folder_path)
+    all_refs[folder_path] = {"classes": all_classes, "functions": all_functions}
+
+    # count distinct files that were indexed
+    indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+
+    summary = (
+        f"Indexed {len(indexed_files)} file(s): "
+        f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+    )
+    log.info(summary)
+    return summary
+
+
+def index_github_repo(github_url: str) -> str:
+    """
+    Clone a GitHub repo (shallow, depth=1) into a temp directory and index it.
+
+    The cache is keyed by ``github_url`` so callers can pass the same URL as
+    ``repo_name`` to the query helpers.
+
+    The temp directory is NOT cleaned up because ``code_ref`` holds references
+    to the indexed bytes.
+
+    @param github_url: HTTPS URL of the GitHub repository.
+    @return: Summary string with counts of files, classes, and functions indexed.
+    """
+    if github_url in all_refs:
+        cached = all_refs[github_url]
+        n_cls = len(cached["classes"])
+        n_fn = len(cached["functions"])
+        return f"Already indexed. Classes: {n_cls}, Functions: {n_fn}"
+
+    tmp_dir = tempfile.mkdtemp(prefix="codereview_")
+    log.info(f"Cloning {github_url} into {tmp_dir} (depth=1) ...")
+    Repo.clone_from(github_url, tmp_dir, depth=1)
+    log.info(f"Cloned. Indexing {tmp_dir} ...")
+
+    all_classes, all_functions = index_all_files(tmp_dir, github_url)
+    all_refs[github_url] = {"classes": all_classes, "functions": all_functions}
+
+    indexed_files = {fn["file"] for fn in all_functions} | {c["file"] for c in all_classes}
+    summary = (
+        f"Indexed {len(indexed_files)} file(s): "
+        f"{len(all_classes)} class(es), {len(all_functions)} function(s)."
+    )
+    log.info(summary)
+    return summary
+
+
+def get_function_context_for_project(function_name:str, repo_name:str,)-> str:
+    """
+    Get the details of a function in a previously indexed repo or folder.
+
+    ``repo_name`` is used only as a cache key.  If the repo/folder has not
+    been indexed yet (via ``index_github_repo`` or ``index_local_folder``),
+    an error message is returned asking the caller to index first.
+
     @param function_name: The name of the function to find.
-    @param github_repo: The URL of the GitHub repo.
-    @param project_root: The root directory of the project.
+    @param repo_name: Cache key (repo URL or folder path) returned by an earlier index call.
     """
+    if repo_name not in all_refs:
+        return (
+            f"Error: '{repo_name}' has not been indexed yet. "
+            "Please call index_github_repo or index_local_folder first."
+        )
     try:
-        _, all_functions = _ensure_repo_indexed(github_repo)
-        contex = get_function_context(function_name,all_functions,github_repo)
+        all_functions = all_refs[repo_name]["functions"]
+        contex = get_function_context(function_name, all_functions, repo_name)
         return contex
     except Exception as e:
         return f"Error: {e}"
